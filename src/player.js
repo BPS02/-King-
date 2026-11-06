@@ -34,7 +34,7 @@ export class Player {
     this.jumpBuffer = 0;
     this.airTime = 0;
     this.move = null;        // current combat move: { name, time, dur, step }
-    this.comboQueued = false;
+    this.comboQueued = 0;
     this.actions = {};
     this.current = null;
     this.lastSafe = new THREE.Vector3();
@@ -53,6 +53,7 @@ export class Player {
 
   // Load a rigged hero model. `height` is how tall it looks (collision stays the same).
   async load(url, height = HEIGHT) {
+    this.propScale = height / 1.75;   // weapons were sized for a 1.75 m hero
     const gltf = await new GLTFLoader().loadAsync(url);
     const model = gltf.scene;
 
@@ -94,7 +95,8 @@ export class Player {
     this.model.updateMatrixWorld(true);
     const wp = (o) => o.getWorldPosition(new THREE.Vector3());
     const toLocal = (bone, dir) => dir.clone().applyQuaternion(bone.getWorldQuaternion(new THREE.Quaternion()).invert()).normalize();
-    const unscale = (obj, bone) => { const ws = bone.getWorldScale(new THREE.Vector3()); obj.scale.set(1 / ws.x, 1 / ws.y, 1 / ws.z); };
+    const k = this.propScale || 1;
+    const unscale = (obj, bone) => { const ws = bone.getWorldScale(new THREE.Vector3()); obj.scale.set(k / ws.x, k / ws.y, k / ws.z); };
     // Rotation whose +Y is `y` and whose +X leans toward `xHint`.
     const basis = (y, xHint) => {
       y = y.clone().normalize();
@@ -143,7 +145,7 @@ export class Player {
     a.timeScale = COMBO_SPEED;
     this.play(name, 0.08);
     this.move = { name, time: 0, dur: a.getClip().duration / COMBO_SPEED, step };
-    this.comboQueued = false;
+    this.comboQueued = 0;
   }
 
   play(name, fade = 0.15) {
@@ -203,9 +205,10 @@ export class Player {
 
     // --- Combat: 3-hit sword combo, kick, block ---
     if (this.hasCombo) {
-      if (input.attackPressed) {
+      // Every press counts, even several in one frame.
+      for (let n = input.attackCount || (input.attackPressed ? 1 : 0); n > 0; n--) {
         if (!this.move) this.startMove('hit1', 1);
-        else if (this.move.step > 0 && this.move.step < 3) this.comboQueued = true;   // press again to chain
+        else if (this.move.step > 0) this.comboQueued = Math.min(3 - this.move.step, (this.comboQueued || 0) + 1);   // buffer up to the finisher
       }
       if (input.kickPressed && !this.move && this.grounded) this.startMove('kick');
     } else if (input.attackPressed && !this.move) {
@@ -215,7 +218,11 @@ export class Player {
       const mv = this.move;
       mv.time += dt;
       // The next hit starts once this one has mostly landed.
-      if (this.comboQueued && mv.time > mv.dur * 0.55) this.startMove('hit' + (mv.step + 1), mv.step + 1);
+      if (this.comboQueued > 0 && mv.step > 0 && mv.step < 3 && mv.time > mv.dur * 0.55) {
+        const left = this.comboQueued - 1;
+        this.startMove('hit' + (mv.step + 1), mv.step + 1);
+        this.comboQueued = left;
+      }
       else if (mv.time >= mv.dur * 0.92) this.move = null;
     }
     this.blocking = blocking;

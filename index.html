@@ -28,9 +28,26 @@
       box-shadow: 0 0 0 3px #3a2a6b; pointer-events: none;
     }
     #hud .small { font-size: 17px; }
+    #hud .bar { width: 220px; height: 9px; margin-top: 5px; background: rgba(0,0,0,0.35); border-radius: 5px; overflow: hidden; }
+    #hud .bar div { height: 100%; background: linear-gradient(90deg, #8fd46a, #ffd84a, #ff8a6a); }
     #help2 { margin-top: 4px; font-weight: 700; }
     #fade { position: fixed; inset: 0; background: #000; opacity: 1; pointer-events: none; transition: opacity 0.45s; }
     #loading { z-index: 2; }
+    #gear {
+      position: fixed; top: 222px; right: 22px; width: 38px; height: 38px; border-radius: 50%; border: 3px solid #fff;
+      background: rgba(30,20,40,0.55); color: #fff; font-size: 20px; cursor: pointer;
+    }
+    #settings {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); display: none; z-index: 3;
+      background: rgba(20,14,26,0.88); color: #fff; padding: 22px 26px; border-radius: 14px; text-align: center; min-width: 320px;
+    }
+    #settings.open { display: block; }
+    #settings .title { font-size: 22px; font-weight: 800; margin-bottom: 14px; }
+    #settings button { margin: 4px; padding: 10px 16px; font-size: 16px; border-radius: 8px; border: 2px solid #8a7aa8; background: #2c2238; color: #fff; cursor: pointer; }
+    #settings button.focus { outline: 3px solid #7fd4ff; outline-offset: 2px; }
+    #settings button.on { background: #d9a441; border-color: #fff; color: #201810; font-weight: 800; }
+    #settings .note { margin-top: 12px; font-size: 13px; opacity: 0.8; }
+    #fps { margin-top: 8px; font-size: 14px; font-weight: 700; }
     #toast {
       position: fixed; top: 22%; width: 100%; text-align: center; color: #fff; font-size: 28px; font-weight: 800;
       text-shadow: 2px 2px 0 #3a2a6b; pointer-events: none; opacity: 0; transition: opacity 0.4s;
@@ -42,9 +59,11 @@
   <div id="hud"></div>
   <canvas id="minimap"></canvas>
   <div id="toast"></div>
-  <div id="help">WASD / Arrows: move &nbsp;·&nbsp; Space: jump &nbsp;·&nbsp; Shift: walk &nbsp;·&nbsp; J or Click: sword (press again for a 3-hit combo) &nbsp;·&nbsp; K or Right-click: block &nbsp;·&nbsp; L: kick &nbsp;·&nbsp; Drag mouse: camera<div id="help2"></div></div>
+  <div id="help"><span id="helpKeys">WASD / Arrows: move &nbsp;·&nbsp; Space: jump &nbsp;·&nbsp; Shift: walk &nbsp;·&nbsp; J or Click: sword (press again for a 3-hit combo) &nbsp;·&nbsp; K or Right-click: block &nbsp;·&nbsp; L: kick &nbsp;·&nbsp; Drag mouse: camera &nbsp;·&nbsp; Mouse wheel: zoom &nbsp;·&nbsp; O: graphics</span><div id="help2"></div></div>
   <div id="banner"></div>
   <div id="fade"></div>
+  <button id="gear" title="Graphics settings (O)">⚙</button>
+  <div id="settings"></div>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

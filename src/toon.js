@@ -1,88 +1,58 @@
 import * as THREE from 'three';
 
-// A 3-step gradient gives the flat, anime-style shading bands.
-let gradient;
-export function toonGradient() {
-  if (gradient) return gradient;
-  const data = new Uint8Array([90, 170, 255]);
-  gradient = new THREE.DataTexture(data, data.length, 1, THREE.RedFormat);
-  gradient.minFilter = THREE.NearestFilter;
-  gradient.magFilter = THREE.NearestFilter;
-  gradient.needsUpdate = true;
-  return gradient;
-}
+// Material helpers. The game started cel-shaded ("toon"); it now renders with physically based
+// (PBR) materials. The old function names are kept so all the level code still works.
 
-// Plain colored toon materials are shared (cached) so big levels stay fast.
-const toonCache = new Map();
+// Plain colored PBR material (cached so big levels stay fast).
+const cache = new Map();
 export function toonMaterial(color, extra = null) {
   if (!extra) {
-    if (!toonCache.has(color)) toonCache.set(color, new THREE.MeshToonMaterial({ color, gradientMap: toonGradient() }));
-    return toonCache.get(color);
+    if (!cache.has(color)) cache.set(color, new THREE.MeshStandardMaterial({ color, roughness: 0.78, metalness: 0 }));
+    return cache.get(color);
   }
-  return new THREE.MeshToonMaterial({ color, gradientMap: toonGradient(), ...extra });
+  const { gradientMap, ...rest } = extra;
+  void gradientMap;
+  return new THREE.MeshStandardMaterial({ color, roughness: 0.78, metalness: 0, ...rest });
 }
 
-// Glowing toon material (lanterns, lava, crystals). Also cached.
+// Glowing material (paper lanterns, lava, crystals). Bright enough to trigger bloom.
 const glowCache = new Map();
 export function glowMaterial(color, intensity = 0.8) {
   const key = color + ':' + intensity;
-  if (!glowCache.has(key)) glowCache.set(key, toonMaterial(color, { emissive: color, emissiveIntensity: intensity }));
+  if (!glowCache.has(key)) glowCache.set(key, new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: intensity * 2.2, roughness: 0.6 }));
   return glowCache.get(key);
 }
 
-// Black outline drawn by pushing back-faces outward along their normals ("inverted hull").
-// Works for skinned and instanced meshes too.
-const outlineCache = new Map();
+// Outlines belonged to the cartoon look; in the realistic style they are switched off.
 export function outlineMaterial(thickness, color = 0x1c1430) {
-  const key = thickness + ':' + color;
-  if (outlineCache.has(key)) return outlineCache.get(key);
-  const mat = new THREE.MeshBasicMaterial({ color, side: THREE.BackSide });
-  mat.onBeforeCompile = (shader) => {
-    shader.uniforms.outlineThickness = { value: thickness };
-    shader.vertexShader = 'uniform float outlineThickness;\n' + shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      '#include <begin_vertex>\ntransformed += normalize(normal) * outlineThickness;'
-    );
-  };
-  mat.customProgramCacheKey = () => 'outline' + thickness;
-  outlineCache.set(key, mat);
-  return mat;
+  return new THREE.MeshBasicMaterial({ color, side: THREE.BackSide, visible: false });
 }
+export function addOutline(mesh) { return mesh; }
+export function toonGradient() { return null; }
 
-// Convert every mesh in a loaded model to toon shading and add an outline copy.
-export function makeToon(root, outlineThickness) {
-  const meshes = [];
-  root.traverse((o) => { if (o.isMesh) meshes.push(o); });
-  for (const mesh of meshes) {
-    const old = mesh.material;
-    mesh.material = new THREE.MeshToonMaterial({
-      map: old.map || null,
-      color: old.map ? 0xffffff : old.color,
-      gradientMap: toonGradient(),
+// Prepare a loaded character for realistic rendering: keep ALL of its original PBR maps
+// (color, normal, metal/roughness), add a lacquer-like clear coat, and enable shadows.
+export function makeHero(root) {
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const old = o.material;
+    const m = new THREE.MeshPhysicalMaterial({
+      map: old.map, normalMap: old.normalMap, normalScale: old.normalScale?.clone() ?? new THREE.Vector2(1, 1),
+      roughnessMap: old.roughnessMap, metalnessMap: old.metalnessMap, aoMap: old.aoMap, emissiveMap: old.emissiveMap,
+      color: old.color?.clone() ?? new THREE.Color(1, 1, 1), roughness: old.roughness ?? 1, metalness: old.metalness ?? 0,
+      emissive: old.emissive?.clone() ?? new THREE.Color(0, 0, 0),
+      clearcoat: 0.35, clearcoatRoughness: 0.35, envMapIntensity: 1.1,
     });
-    mesh.castShadow = true;
-    mesh.frustumCulled = false;
-
-    let outline;
-    if (mesh.isSkinnedMesh) {
-      outline = new THREE.SkinnedMesh(mesh.geometry, outlineMaterial(outlineThickness));
-      outline.bind(mesh.skeleton, mesh.bindMatrix);
-    } else {
-      outline = new THREE.Mesh(mesh.geometry, outlineMaterial(outlineThickness));
-    }
-    outline.frustumCulled = false;
-    mesh.parent.add(outline);
-    outline.position.copy(mesh.position);
-    outline.quaternion.copy(mesh.quaternion);
-    outline.scale.copy(mesh.scale);
-  }
+    if (m.map) m.map.colorSpace = THREE.SRGBColorSpace;
+    for (const t of [m.map, m.normalMap, m.roughnessMap]) if (t) t.anisotropy = 8;
+    o.material = m;
+    o.castShadow = true;
+    o.receiveShadow = true;
+    o.frustumCulled = false;
+  });
 }
-
-// Outline helper for simple level meshes.
-export function addOutline(mesh, thickness = 0.04) {
-  mesh.add(new THREE.Mesh(mesh.geometry, outlineMaterial(thickness)));
-  return mesh;
-}
+// Kept for compatibility with older code.
+export const makeToon = (root) => makeHero(root);
 
 // Soft round glow used for lantern halos, fireflies, embers, the sky orb...
 let glowTex;

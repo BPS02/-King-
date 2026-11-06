@@ -1,6 +1,21 @@
 import * as THREE from 'three';
 import { toonMaterial, glowMaterial, addOutline, glowSprite, outlineMaterial, glowTexture } from './toon.js';
 import { noise, rng } from './stage.js';
+import { pbr, solid, Q } from './graphics.js';
+import { blossomTexture, leafTexture, grassTexture, bambooTexture } from './proctex.js';
+
+// ---------- Realistic material shortcuts ----------
+const lighten = (c, k = 0.5) => new THREE.Color(c).lerp(new THREE.Color(0xffffff), k).getHex();
+const lum = (c) => { const k = new THREE.Color(c); return 0.2126 * k.r + 0.7152 * k.g + 0.0722 * k.b; };
+export const woodFor = (c) => (lum(c) < 0.12 ? pbr('darkWood') : pbr('hinoki', { tint: lighten(c, 0.55) }));
+export const roofMat = (c) => pbr('roofTiles', { tint: lighten(c, 0.45), rough: 0.9 });
+export const plasterMat = (c) => pbr('plaster', { tint: c });
+// Painted / lacquered wood: solid paint color over real wood-grain bumps.
+export const paintMat = (c, rough = 0.5) => pbr('wood', { tint: new THREE.Color(c).multiplyScalar(0.82).getHex(), textureColor: false, rough, normal: 0.6 });
+export const stoneMat = (c = 0xdedad6) => pbr('flagstone', { tint: c, tile: 1.4 });
+export const IRON = () => solid(0x18181c, { rough: 0.45, metal: 0.75 });
+export const GOLD = () => solid(0xd9a441, { rough: 0.3, metal: 1 });
+export const cloth = (c) => solid(c, { rough: 0.92, side: THREE.DoubleSide });
 
 // Reusable scenery pieces for the levels. Each takes the stage `s` so it can add
 // meshes and collision. All collision boxes are axis-aligned, so buildings only
@@ -15,8 +30,9 @@ export function jpRoof(w, d, h, color, outline = 0.05) {
   const lower = new THREE.CylinderGeometry(R * 0.62, R, h * 0.32, 4, 1).rotateY(Math.PI / 4).translate(0, h * 0.16, 0);
   const upper = new THREE.CylinderGeometry(R * 0.06, R * 0.62, h * 0.68, 4, 1).rotateY(Math.PI / 4).translate(0, h * 0.32 + h * 0.34, 0);
   for (const geo of [lower, upper]) {
-    const m = addOutline(new THREE.Mesh(geo, toonMaterial(color)), outline);
+    const m = addOutline(new THREE.Mesh(geo, roofMat(color)), outline);
     m.castShadow = true;
+    m.receiveShadow = true;
     g.add(m);
   }
   g.scale.set(w, 1, d);
@@ -30,14 +46,20 @@ export function jpHouse(s, x, z, {
 } = {}) {
   const [fx, fz] = FACES[face];
   const top = ground + h;
-  s.block(x, top, z, w, h + 0.5, d, wall);
+  // Dark walls are timber planks (old machiya); light walls are plaster.
+  s.block(x, top, z, w, h + 0.5, d, wall, { material: lum(wall) < 0.15 ? pbr('darkWood', { tint: lighten(wall, 0.55) }) : plasterMat(wall) });
   // Dark corner posts and a beam along the top.
   for (const [cx, cz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, h, 0.3), toonMaterial(trim));
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, h, 0.3), woodFor(trim));
+    post.castShadow = true;
     post.position.set(x + cx * (w / 2 - 0.1), ground + h / 2, z + cz * (d / 2 - 0.1));
     s.add(post);
   }
-  const beam = new THREE.Mesh(new THREE.BoxGeometry(w + 0.1, 0.35, d + 0.1), toonMaterial(trim));
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(w + 0.1, 0.35, d + 0.1), woodFor(trim));
+  // Timber-frame beam halfway up the walls, like real machiya / minka houses.
+  const mid = new THREE.Mesh(new THREE.BoxGeometry(w + 0.06, 0.18, d + 0.06), woodFor(trim));
+  mid.position.set(x, ground + Math.min(2.7, h * 0.62), z);
+  s.add(mid);
   beam.position.set(x, top - 0.17, z);
   s.add(beam);
 
@@ -55,21 +77,25 @@ export function jpHouse(s, x, z, {
     s.add(mesh);
     return mesh;
   };
-  onFront(0, ground + 1.1, new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.2, 0.12), toonMaterial(door)));
-  if (noren) onFront(0, ground + 2.0, new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.8, 0.06), toonMaterial(noren)), 0.15);
+  onFront(0, ground + 1.1, new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.2, 0.12), pbr('darkWood', { tint: lighten(door, 0.35) })));
+  if (noren) onFront(0, ground + 2.0, new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.8, 0.06), cloth(noren)), 0.15);
   const rows = upper ? [ground + 1.6, ground + 3.4] : [ground + 1.6];
   for (const wy of rows) for (const side of upper && wy > ground + 2 ? [-1, 0, 1] : [-1, 1]) {
     if (lat < 2.2) break;
-    const win = onFront(side * lat * 0.55, wy, new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.0, 0.1), glowMaterial(window, upper ? 0.7 : 0.25)));
-    win.add(new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.08, 0.14), toonMaterial(trim)));
-    win.add(new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.05, 0.14), toonMaterial(trim)));
+    // Shoji paper window with a wooden lattice.
+    const win = onFront(side * lat * 0.55, wy, new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.0, 0.1), solid(window, { rough: 0.95, emissive: window, emissiveIntensity: upper ? 0.9 : 0.12 })));
+    const lattice = woodFor(trim);
+    for (const yy of [-0.25, 0, 0.25]) { const b = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.05, 0.14), lattice); b.position.y = yy; win.add(b); }
+    for (const xx of [-0.4, 0, 0.4]) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.05, 0.14), lattice); b.position.x = xx; win.add(b); }
+    if (upper) s.lightSpot(fcx + fx * 1.2 + -fz * side * lat * 0.55, wy, fcz + fz * 1.2 + fx * side * lat * 0.55, 0xffb366, 3, 8);
   }
-  if (sign) onFront(0, top - 0.75, new THREE.Mesh(new THREE.BoxGeometry(Math.min(3.2, lat * 1.4), 0.8, 0.12), toonMaterial(sign)), 0.12);
+  if (sign) onFront(0, top - 0.75, new THREE.Mesh(new THREE.BoxGeometry(Math.min(3.2, lat * 1.4), 0.8, 0.12), pbr('hinoki', { tint: sign })), 0.12);
   if (awning) {
     // Striped awning you can stand on (a handy step up to the roof).
     const aw = new THREE.Group();
     for (let i = 0; i < 6; i++) {
-      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 1.5), toonMaterial(i % 2 ? awningStripe : awning));
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 1.5), cloth(i % 2 ? awningStripe : awning));
+      strip.castShadow = true;
       strip.position.set(-1.25 + i * 0.5, 0, 0.75);
       aw.add(strip);
     }
@@ -88,16 +114,23 @@ export function jpHouse(s, x, z, {
 
 export function paperLantern(s, x, y, z, color = 0xe0303a, scale = 1, halo = true) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 8), glowMaterial(color, 0.7));
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 12), glowMaterial(color, s.night ? 0.7 : 0.18));
   body.scale.y = 1.3;
   const cap = new THREE.CylinderGeometry(0.2, 0.2, 0.08, 10);
-  const c1 = new THREE.Mesh(cap, toonMaterial(0x222222)); c1.position.y = 0.45;
-  const c2 = new THREE.Mesh(cap, toonMaterial(0x222222)); c2.position.y = -0.45;
+  const c1 = new THREE.Mesh(cap, IRON()); c1.position.y = 0.45;
+  const c2 = new THREE.Mesh(cap, IRON()); c2.position.y = -0.45;
+  // Paper ribs.
+  for (let i = -2; i <= 2; i++) {
+    const rib = new THREE.Mesh(new THREE.TorusGeometry(0.355 * Math.cos(i * 0.32), 0.012, 4, 20), solid(0x3a1a12, { rough: 0.8 }));
+    rib.rotation.x = Math.PI / 2; rib.position.y = i * 0.12; rib.scale.z = 1;
+    g.add(rib);
+  }
   g.add(body, c1, c2);
-  if (halo) g.add(glowSprite(color, 2.4, 0.5));
+  if (halo && s.night) g.add(glowSprite(color, 2.4, 0.5));
   g.position.set(x, y, z);
   g.scale.setScalar(scale);
   s.add(g);
+  if (halo) s.lightSpot(x, y - 0.2, z, color, 5 * scale, 10);
   return g;
 }
 
@@ -117,22 +150,23 @@ export function lanternString(s, a, b, n, color = 0xe0303a) {
 }
 
 export function lampPost(s, x, z, ground, h = 4.2, light = 0xfff0b0) {
-  s.pillar(x, z, 0.1, ground, ground + h, 0x2b2b30, null, { segments: 8, blockCamera: false });
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.75, 0.55), toonMaterial(0x2b2b30));
+  s.pillar(x, z, 0.1, ground, ground + h, 0x2b2b30, null, { segments: 8, blockCamera: false, material: IRON() });
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.75, 0.55), IRON());
   head.position.set(x, ground + h + 0.3, z);
-  const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.55, 0.42), glowMaterial(light, 1));
+  const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.55, 0.42), glowMaterial(light, s.night ? 1 : 0.12));
   lamp.position.copy(head.position);
-  const capm = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.4, 4).rotateY(Math.PI / 4), toonMaterial(0x2b2b30));
+  const capm = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.4, 4).rotateY(Math.PI / 4), IRON());
   capm.position.set(x, ground + h + 0.85, z);
-  const halo = glowSprite(light, 2.6, 0.55);
+  const halo = glowSprite(light, 2.6, s.night ? 0.55 : 0);
   halo.position.copy(head.position);
   s.add(lamp, capm, halo);
+  s.lightSpot(x, ground + h + 0.2, z, light, 7, 13);
   return head.position;
 }
 
 export function stoneLantern(s, x, z, ground, scale = 1, light = 0xffd27a) {
   const g = new THREE.Group();
-  const stone = toonMaterial(0x9a96a0);
+  const stone = stoneMat(0xe6e2dc);
   const parts = [
     [new THREE.CylinderGeometry(0.45, 0.55, 0.3, 8), 0.15],
     [new THREE.CylinderGeometry(0.16, 0.2, 0.9, 8), 0.75],
@@ -140,13 +174,14 @@ export function stoneLantern(s, x, z, ground, scale = 1, light = 0xffd27a) {
     [new THREE.ConeGeometry(0.62, 0.45, 4).rotateY(Math.PI / 4), 1.8],
   ];
   for (const [geo, y] of parts) { const m = addOutline(new THREE.Mesh(geo, stone), 0.03); m.position.y = y; m.castShadow = true; g.add(m); }
-  const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.4, 0.45), glowMaterial(light, 0.9));
+  const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.4, 0.45), glowMaterial(light, s.night ? 0.9 : 0.1));
   lamp.position.y = 1.52;
   g.add(lamp);
   g.position.set(x, ground, z);
   g.scale.setScalar(scale);
   s.add(g);
   s.solidCyl(x, z, 0.5 * scale, ground, ground + 2 * scale);
+  s.lightSpot(x, ground + 1.55 * scale, z, light, 3, 7);
 }
 
 // Red shrine gate. Its top beam is walkable. axis = 'x' means the beam runs along X.
@@ -154,51 +189,144 @@ export function torii(s, x, z, ground, { span = 6, h = 6, color = 0xe03a2a, axis
   const ax = axis === 'x' ? 1 : 0, az = 1 - ax;
   for (const side of [-1, 1]) {
     const px = x + ax * side * span / 2, pz = z + az * side * span / 2;
-    s.pillar(px, pz, 0.32, ground, ground + h, color, null, { segments: 12 });
-    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.4, 0.8, 12), toonMaterial(0x222222));
+    s.pillar(px, pz, 0.32, ground, ground + h, color, null, { segments: 16, material: paintMat(color) });
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.4, 0.8, 16), paintMat(0x1a1416, 0.4));
     foot.position.set(px, ground + 0.4, pz);
     s.add(foot);
   }
   const L = span + 2.4;
-  s.block(x, ground + h + 0.7, z, ax ? L : 0.8, 0.45, az ? L : 0.8, top);
-  s.block(x, ground + h + 0.25, z, ax ? L - 0.4 : 0.6, 0.25, az ? L - 0.4 : 0.6, color, { outline: 0.03 });
-  s.block(x, ground + h - 1.1, z, ax ? span + 0.9 : 0.4, 0.35, az ? span + 0.9 : 0.4, color, { outline: 0.03 });
+  s.block(x, ground + h + 0.7, z, ax ? L : 0.8, 0.45, az ? L : 0.8, top, { material: paintMat(top, 0.4) });
+  s.block(x, ground + h + 0.25, z, ax ? L - 0.4 : 0.6, 0.25, az ? L - 0.4 : 0.6, color, { material: paintMat(color) });
+  s.block(x, ground + h - 1.1, z, ax ? span + 0.9 : 0.4, 0.35, az ? span + 0.9 : 0.4, color, { material: paintMat(color) });
+  // Name plaque between the beams.
+  const plaque = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.9, 0.12), paintMat(0x1a1416, 0.4));
+  plaque.position.set(x, ground + h - 0.45, z);
+  if (!ax) plaque.rotation.y = Math.PI / 2;
+  s.add(plaque);
 }
 
 export function cherryTree(s, x, z, ground, { scale = 1, colors = [0xffb7d0, 0xff9cc2, 0xffd1e3], trunk = 0x5a3a2a, seed = 1 } = {}) {
   const r = rng(Math.floor(x * 73 + z * 31 + seed));
   const g = new THREE.Group();
-  const t = addOutline(new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.42, 3.2, 8).translate(0, 1.6, 0), toonMaterial(trunk)), 0.04);
-  t.rotation.z = (r() - 0.5) * 0.3;
+  const bark = pbr('bark', { tint: lighten(trunk, 0.35) });
+  const lean = (r() - 0.5) * 0.3;
+  const t = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.42, 3.2, 12).translate(0, 1.6, 0), bark);
+  t.rotation.z = lean;
   t.castShadow = true;
   g.add(t);
-  for (let i = 0; i < 2; i++) {
-    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.16, 1.8, 6).translate(0, 0.9, 0), toonMaterial(trunk));
-    b.position.y = 2.4;
-    b.rotation.z = (i ? 1 : -1) * (0.6 + r() * 0.3);
-    b.rotation.y = r() * Math.PI;
-    g.add(b);
+  // Main limbs fork out from the top of the trunk, each with a smaller twig.
+  const tips = [];
+  const limbs = 3 + Math.floor(r() * 2);
+  for (let i = 0; i < limbs; i++) {
+    const yaw = (i / limbs) * Math.PI * 2 + r() * 0.8, tilt = 0.55 + r() * 0.35, len = 1.6 + r() * 0.8;
+    const limb = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.15, len, 8).translate(0, len / 2, 0), bark);
+    limb.position.set(Math.sin(lean) * -2.6, 2.6, 0);
+    limb.rotation.set(0, yaw, tilt, 'YXZ');
+    limb.castShadow = true;
+    g.add(limb);
+    limb.updateMatrix();
+    tips.push(new THREE.Vector3(0, len, 0).applyMatrix4(limb.matrix));
   }
-  const n = 6 + Math.floor(r() * 3);
-  for (let i = 0; i < n; i++) {
-    const a = r() * Math.PI * 2, d = 0.6 + r() * 1.4;
-    const blob = addOutline(new THREE.Mesh(new THREE.IcosahedronGeometry(0.9 + r() * 0.6, 1), toonMaterial(colors[i % colors.length])), 0.04);
-    blob.position.set(Math.cos(a) * d, 3.4 + r() * 1.3, Math.sin(a) * d);
-    blob.scale.y = 0.75;
+  // Canopy: a soft inner volume plus many flower-cluster cards around it.
+  const blobs = [];
+  for (const tip of tips) for (let k = 0; k < 2; k++) {
+    blobs.push(tip.clone().add(new THREE.Vector3((r() - 0.5) * 1.2, 0.3 + r() * 0.6, (r() - 0.5) * 1.2)));
+  }
+  const inner = solid(new THREE.Color(colors[0]).lerp(new THREE.Color(0xffffff), 0.15).getHex(), { rough: 0.95 });
+  for (const b of blobs) {
+    const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(0.75 + r() * 0.3, 1), inner);
+    blob.position.copy(b);
+    blob.scale.y = 0.7;
     blob.castShadow = true;
     g.add(blob);
   }
   g.position.set(x, ground, z);
   g.scale.setScalar(scale);
   s.add(g);
+  const batch = cardBatch(s, 'blossom', () => blossomTexture(), 1.0);
+  const perBlob = Math.round(16 + 30 * Q.detail);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3();
+  for (const b of blobs) for (let k = 0; k < perBlob; k++) {
+    const u = r() * Math.PI * 2, v = Math.acos(2 * r() - 1), rad = 0.75 + r() * 0.45;
+    p.set(Math.sin(v) * Math.cos(u) * rad, Math.cos(v) * rad * 0.7, Math.sin(v) * Math.sin(u) * rad).add(b).multiplyScalar(scale).add(g.position);
+    e.set(r() * Math.PI, r() * Math.PI, r() * Math.PI);
+    const sz = (0.9 + r() * 0.6) * scale;
+    batch.mats.push(m.compose(p, q.setFromEuler(e), new THREE.Vector3(sz, sz, sz)).clone());
+    batch.cols.push(new THREE.Color(colors[k % colors.length]).lerp(new THREE.Color(0xffffff), 0.25 + r() * 0.3));
+  }
   s.solidCyl(x, z, 0.4 * scale, ground - 1, ground + 3 * scale);
   return g;
+}
+
+// Collects alpha-tested "card" quads (flower clusters, leaves, grass) from many trees
+// into one InstancedMesh per kind, built when the level is finalized. One draw call each.
+export function cardBatch(s, kind, makeTexture, alphaTest = 0.45, sway = 0) {
+  s._cards = s._cards || {};
+  if (s._cards[kind]) return s._cards[kind];
+  const batch = { mats: [], cols: [] };
+  s._cards[kind] = batch;
+  s.onFinalize(() => {
+    if (!batch.mats.length) return;
+    const mat = new THREE.MeshStandardMaterial({ map: makeTexture(), alphaTest, side: THREE.DoubleSide, roughness: 0.85 });
+    mat.onBeforeCompile = (sh) => {
+      // Foliage is thin and lets light through, so light both sides alike (no dark backs).
+      sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>',
+        THREE.ShaderChunk.normal_fragment_begin.split('normal *= faceDirection;').join(''));
+      if (!sway) return;
+      // Gentle wind: tops of the cards move, bottoms stay put.
+      sh.uniforms.time = { value: 0 };
+      s.onUpdate((dt, t) => { sh.uniforms.time.value = t; });
+      sh.vertexShader = 'uniform float time;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+        '#include <begin_vertex>\nfloat ph = instanceMatrix[3].x * 0.3 + instanceMatrix[3].z * 0.2;\ntransformed.x += sin(time * 1.6 + ph) * ' + sway + ' * max(position.y + 0.5, 0.0);');
+    };
+    mat.customProgramCacheKey = () => 'card' + kind + sway;
+    const geo = kind === 'grass' ? grassGeometry() : new THREE.PlaneGeometry(1, 1);
+    const im = s.instanced(geo, mat, batch.mats, { colors: batch.cols, shadow: kind !== 'grass' });
+    im.frustumCulled = false;
+    // Layer 2: cut-out cards are hidden from the ambient-occlusion pass (it can't see their transparency).
+    im.layers.set(2);
+  });
+  return batch;
+}
+
+// Two crossed quads standing on the ground (bottom at y = 0).
+function grassGeometry() {
+  const a = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0);
+  const b = a.clone().rotateY(Math.PI / 2);
+  const g = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal', 'uv']) {
+    const A = a.attributes[name].array, B = b.attributes[name].array;
+    const out = new Float32Array(A.length + B.length); out.set(A); out.set(B, A.length);
+    g.setAttribute(name, new THREE.BufferAttribute(out, a.attributes[name].itemSize));
+  }
+  const ia = a.index.array, idx = [...ia, ...Array.from(ia, (i) => i + a.attributes.position.count)];
+  g.setIndex(idx);
+  // Point all normals up so grass is lit like the ground under it.
+  const n = g.attributes.normal; for (let i = 0; i < n.count; i++) n.setXYZ(i, 0, 1, 0);
+  return g;
+}
+
+// Scatter swaying grass tufts. pick(x, z) returns the ground height or null to skip.
+export function grassField(s, count, area, pick, colors = [0xe8f4c8, 0xf4f8d0, 0xd8ecb8]) {
+  const n = Math.round(count * Q.detail);
+  if (!n) return;
+  const batch = cardBatch(s, 'grass', () => grassTexture(), 0.5, 0.12);
+  const r = rng(count + 99), m = new THREE.Matrix4(), q = new THREE.Quaternion();
+  for (let i = 0, tries = 0; i < n && tries < n * 4; tries++) {
+    const x = area.x0 + r() * (area.x1 - area.x0), z = area.z0 + r() * (area.z1 - area.z0);
+    const y = pick(x, z);
+    if (y === null || y === undefined) continue;
+    const sz = 0.45 + r() * 0.45;
+    batch.mats.push(m.compose(new THREE.Vector3(x, y - 0.02, z), q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), r() * Math.PI), new THREE.Vector3(sz * 1.3, sz, sz * 1.3)).clone());
+    batch.cols.push(new THREE.Color(colors[i % colors.length]).multiplyScalar(0.85 + r() * 0.3));
+    i++;
+  }
 }
 
 // Open wooden pavilion with a walkable roof.
 export function pavilion(s, x, z, ground, { w = 4, d = 4, h = 3.2, post = 0x6b4a2e, roof = 0x4a3a2a, lanterns = null } = {}) {
   for (const [cx, cz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]])
-    s.pillar(x + cx * w / 2, z + cz * d / 2, 0.18, ground, ground + h, post, null, { segments: 8, blockCamera: false });
+    s.pillar(x + cx * w / 2, z + cz * d / 2, 0.18, ground, ground + h, post, null, { segments: 10, blockCamera: false, material: woodFor(post) });
   const r = jpRoof(w + 1.6, d + 1.6, 1.5, roof);
   r.position.set(x, ground + h, z);
   s.add(r);
@@ -211,27 +339,28 @@ export function pavilion(s, x, z, ground, { w = 4, d = 4, h = 3.2, post = 0x6b4a
 // Climbable tiered pagoda. Each roof eave is a ledge; jump from eave to eave to the top.
 export function pagoda(s, x, z, ground, {
   tiers = 5, half = 4.5, shrink = 0.8, tierH = 1.6, overhang = 1.3, firstH = 2.8,
-  wall = 0x7a4a2a, roof = 0x3d4a48, trim = 0xe0b040, lanterns = null, steps = '+z',
+  wall = 0x7a4a2a, roof = 0x3d4a48, trim = 0xe0b040, lanterns = null, steps = '+z', wallMaterial = null,
 } = {}) {
   let y = ground, hb = half;
   for (let i = 0; i < tiers; i++) {
     hb = half - i * shrink;
     const bodyH = i === 0 ? firstH : tierH - 0.35;
-    s.block(x, y + bodyH, z, hb * 2, bodyH + 0.05, hb * 2, wall);
+    s.block(x, y + bodyH, z, hb * 2, bodyH + 0.05, hb * 2, wall, { material: wallMaterial || paintMat(wall, 0.6) });
     // Rails / balcony stripe.
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(hb * 2 + 0.1, 0.18, hb * 2 + 0.1), toonMaterial(trim));
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(hb * 2 + 0.1, 0.18, hb * 2 + 0.1), GOLD());
     stripe.position.set(x, y + bodyH * 0.35, z);
     s.add(stripe);
     y += bodyH;
     const e = hb + overhang;
     const R = Math.SQRT2;
-    const eave = addOutline(new THREE.Mesh(new THREE.CylinderGeometry(hb * R, e * R, 0.45, 4, 1).rotateY(Math.PI / 4), toonMaterial(roof)), 0.05);
+    const eave = addOutline(new THREE.Mesh(new THREE.CylinderGeometry(hb * R, e * R, 0.45, 4, 1).rotateY(Math.PI / 4), roofMat(roof)), 0.05);
+    eave.receiveShadow = true;
     eave.position.set(x, y + 0.2, z);
     eave.castShadow = true;
     s.add(eave);
     s.solidBox(x, y + 0.35, z, e * 2, 0.4, e * 2);
     for (const [cx, cz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.5, 6), toonMaterial(trim));
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.5, 6), GOLD());
       tip.position.set(x + cx * e, y + 0.3, z + cz * e);
       s.add(tip);
       if (lanterns && i < tiers - 1) paperLantern(s, x + cx * (e - 0.2), y - 0.5, z + cz * (e - 0.2), lanterns, 0.55, false);
@@ -239,11 +368,11 @@ export function pagoda(s, x, z, ground, {
     y += 0.35;
   }
   // Golden spire on top.
-  const spire = addOutline(new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.2, 3.4, 8), toonMaterial(trim)), 0.03);
+  const spire = addOutline(new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.2, 3.4, 8), GOLD()), 0.03);
   spire.position.set(x, y + 1.7, z);
   s.add(spire);
   for (let i = 0; i < 5; i++) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.32 - i * 0.03, 0.06, 6, 12), toonMaterial(trim));
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.32 - i * 0.03, 0.06, 6, 12), GOLD());
     ring.rotation.x = Math.PI / 2;
     ring.position.set(x, y + 0.6 + i * 0.45, z);
     s.add(ring);
@@ -251,15 +380,15 @@ export function pagoda(s, x, z, ground, {
   s.solidCyl(x, z, 0.3, y, y + 3.4);
   // Crates to reach the first eave.
   const [fx, fz] = FACES[steps], e0 = half + overhang;
-  s.block(x + fx * (e0 + 0.9), ground + 2.2, z + fz * (e0 + 0.9), 1.4, 2.2, 1.4, 0xa0703f);
-  s.block(x + fx * (e0 + 2.4) + fz * 1.2, ground + 1.1, z + fz * (e0 + 2.4) + fx * 1.2, 1.4, 1.1, 1.4, 0xa0703f);
+  s.block(x + fx * (e0 + 0.9), ground + 2.2, z + fz * (e0 + 0.9), 1.4, 2.2, 1.4, 0xa0703f, { material: pbr('hinoki', { tint: 0xc8a070 }) });
+  s.block(x + fx * (e0 + 2.4) + fz * 1.2, ground + 1.1, z + fz * (e0 + 2.4) + fx * 1.2, 1.4, 1.1, 1.4, 0xa0703f, { material: pbr('hinoki', { tint: 0xc8a070 }) });
   return { top: y, half: hb + overhang };
 }
 
 // Floating rock island with jagged underside.
 export function floatingRock(s, x, y, z, r, { top = 0xeee8f5, rock = 0x5a4a6a, depth = 2.2, solid = true } = {}) {
   const g = new THREE.Group();
-  const t = addOutline(new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.96, 0.5, 18), toonMaterial(top)), 0.04);
+  const t = addOutline(new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.96, 0.5, 24), pbr('grass', { tint: top })), 0.04);
   t.position.y = -0.25;
   t.receiveShadow = t.castShadow = true;
   let geo = new THREE.ConeGeometry(r * 0.95, r * depth, 9, 4).rotateX(Math.PI);
@@ -272,7 +401,7 @@ export function floatingRock(s, x, y, z, r, { top = 0xeee8f5, rock = 0x5a4a6a, d
     p.setXYZ(i, vx * (1 + n * 0.5), vy + n * r * 0.3, vz * (1 + n * 0.5));
   }
   geo.computeVertexNormals();
-  const k = addOutline(new THREE.Mesh(geo, toonMaterial(rock)), 0.04);
+  const k = addOutline(new THREE.Mesh(geo, stoneMat(lighten(rock, 0.45))), 0.04);
   k.position.y = -0.5 - r * depth / 2;
   k.castShadow = true;
   g.add(t, k);
@@ -288,12 +417,12 @@ export function archBridge(s, x, z0, z1, base, { width = 3, rise = 1.6, color = 
   for (let i = 0; i < n; i++) {
     const t = (i + 0.5) / n, z = z0 - len * (i + 0.5);
     const top = base + 0.25 + Math.sin(t * Math.PI) * rise;
-    s.block(x, top, z, width, 0.4, len + 0.04, deck, { outline: 0.02, blockCamera: false });
+    s.block(x, top, z, width, 0.4, len + 0.04, deck, { outline: 0.02, blockCamera: false, material: pbr('hinoki', { tint: lighten(deck, 0.4) }) });
     for (const side of [-1, 1]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.0, 0.16), toonMaterial(color));
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.0, 0.16), paintMat(color));
       post.position.set(x + side * (width / 2 - 0.08), top + 0.5, z);
       s.add(post);
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, len + 0.05), toonMaterial(color));
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, len + 0.05), paintMat(color));
       rail.position.set(x + side * (width / 2 - 0.08), top + 0.95, z);
       s.add(rail);
     }
@@ -301,7 +430,8 @@ export function archBridge(s, x, z0, z1, base, { width = 3, rise = 1.6, color = 
 }
 
 export function standingStone(s, x, z, ground, h, r, color = 0x2e2a30) {
-  const m = addOutline(new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), toonMaterial(color)), 0.04);
+  const m = addOutline(new THREE.Mesh(new THREE.DodecahedronGeometry(1, 1), pbr('darkRock', { tint: lighten(color, 0.55) })), 0.04);
+  m.receiveShadow = true;
   m.scale.set(r, h / 2, r * 0.8);
   m.position.set(x, ground + h / 2 - 0.2, z);
   m.rotation.set((noise(x, z) - 0.5) * 0.2, noise(z, x) * 3, (noise(x + 3, z) - 0.5) * 0.2);
@@ -313,25 +443,20 @@ export function standingStone(s, x, z, ground, h, r, color = 0x2e2a30) {
 
 // Pole with a cloth banner that sways in the wind.
 export function banner(s, x, z, ground, color = 0xb8222a, h = 4.5) {
-  s.pillar(x, z, 0.08, ground, ground + h, 0x2a2226, null, { segments: 6, blockCamera: false });
-  const cloth = new THREE.Mesh(new THREE.BoxGeometry(0.06, 2.2, 0.9).translate(0, -1.1, 0.5), toonMaterial(color));
+  s.pillar(x, z, 0.08, ground, ground + h, 0x2a2226, null, { segments: 8, blockCamera: false, material: paintMat(0x1a1416, 0.4) });
+  const cloth = new THREE.Mesh(new THREE.BoxGeometry(0.03, 2.2, 0.9).translate(0, -1.1, 0.5), solid(color, { rough: 0.95 }));
+  cloth.castShadow = true;
   cloth.position.set(x, ground + h - 0.2, z);
   s.add(cloth);
   const ph = x + z;
+  cloth.userData.dynamic = true;
   s.onUpdate((dt, t) => { cloth.rotation.y = Math.sin(t * 1.7 + ph) * 0.25; });
 }
 
 // Bamboo stalks (instanced). spots: [{ x, z, y, h }]
 export function bambooGrove(s, spots) {
-  const geo = new THREE.CylinderGeometry(0.13, 0.16, 1, 7, 64).translate(0, 0.5, 0);
-  const pos = geo.attributes.position, cols = new Float32Array(pos.count * 3);
-  const light = new THREE.Color(0x6fbf52), top = new THREE.Color(0x9ad86e), node = new THREE.Color(0x2f5e2a), c = new THREE.Color();
-  for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i), row = Math.round(y * 64);
-    if (row % 8 === 0) c.copy(node); else c.copy(light).lerp(top, y);
-    c.toArray(cols, i * 3);
-  }
-  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  // Low-poly stalk; the node rings and colour come from a small drawn texture.
+  const geo = new THREE.CylinderGeometry(0.13, 0.16, 1, 8, 1, true).translate(0, 0.5, 0);
   const mats = [], leafMats = [], leafCols = [];
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
   const r = rng(spots.length);
@@ -349,8 +474,20 @@ export function bambooGrove(s, spots) {
     }
     s.solidCyl(b.x, b.z, 0.2, b.y - 1, b.y + b.h);
   }
-  s.instanced(geo, toonMaterial(0xffffff, { vertexColors: true }), mats, { outline: 0.03 });
-  s.instanced(new THREE.IcosahedronGeometry(1, 0), toonMaterial(0xffffff), leafMats, { colors: leafCols, shadow: false });
+  s.instanced(geo, new THREE.MeshStandardMaterial({ map: bambooTexture(), roughness: 0.38 }), mats);
+  // Leaf sprays: alpha-tested cards drawn from a bamboo-leaf texture.
+  const leaves = cardBatch(s, 'bambooLeaf', () => leafTexture(), 0.5, 0.06);
+  const sc = new THREE.Vector3(), lp = new THREE.Vector3(), lq = new THREE.Quaternion();
+  leafMats.forEach((lm, i) => {
+    lm.decompose(lp, lq, sc);
+    for (let k = 0; k < 2 + Math.round(2 * Q.detail); k++) {
+      const off = new THREE.Vector3((r() - 0.5) * 1.6, (r() - 0.5) * 1.2, (r() - 0.5) * 1.6);
+      const q2 = new THREE.Quaternion().setFromEuler(new THREE.Euler(r() * 0.8 - 0.4, r() * Math.PI * 2, r() * 0.8 - 0.4));
+      const size = 1.4 + r() * 0.8;
+      leaves.mats.push(new THREE.Matrix4().compose(lp.clone().add(off), q2, new THREE.Vector3(size, size, size)));
+      leaves.cols.push(leafCols[i].clone().multiplyScalar(1.3));
+    }
+  });
 }
 
 // Big distant volcano with glowing lava streaks and a smoke plume. Purely scenery.
@@ -374,13 +511,23 @@ export function volcano(s, x, z, r, h) {
     const t = (vy + h / 2) / h, a = Math.atan2(vz, vx);
     const lit = Math.max(0, n2.getX(i) * L.x + n2.getY(i) * L.y + n2.getZ(i) * L.z);
     const band = lit > 0.6 ? 1 : lit > 0.25 ? 0.72 : 0.5;
-    c.copy(rock).multiplyScalar(band);
+    c.copy(rock).multiplyScalar(0.55 + band * 0.25);
+    if (t > 0.74 && noise(a * 6, t * 9) > 0.32 - (t - 0.74) * 1.6) c.setRGB(0.92, 0.94, 0.98);   // snow cap
     const streak = Math.abs(Math.sin(a * 5 + noise(a * 3, t * 4) * 3));
     if (t > 0.35 && streak > 0.93 - (t - 0.35) * 0.3) c.copy(t > 0.8 ? hot : lava);
     c.toArray(cols, i * 3);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-  const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, fog: false }));
+  const glowAttr = new Float32Array(p2.count);
+  for (let i = 0; i < p2.count; i++) { const ci = i * 3; glowAttr[i] = cols[ci] > 0.8 && cols[ci + 2] < 0.5 ? 1 : 0; }
+  geo.setAttribute('lava', new THREE.BufferAttribute(glowAttr, 1));
+  const vmat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, flatShading: true, fog: false });
+  vmat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float lava;\nvarying float vLava;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvLava = lava;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vLava;').replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vColor.rgb * vLava * 3.0;');
+  };
+  vmat.customProgramCacheKey = () => 'volcanoLava';
+  const m = new THREE.Mesh(geo, vmat);
   m.position.set(x, h / 2 - 2, z);
   s.add(m);
   const top = h * 0.92 - 2;
@@ -420,6 +567,7 @@ export function portal(s, x, z, ground, { id, name, color, done = false, facing 
   g.add(ring, disc, swirl);
   g.position.set(x, ground + 2.2, z);
   g.rotation.y = facing;
+  g.userData.dynamic = true;
   s.add(g);
 
   // Floating name label.

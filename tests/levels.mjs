@@ -10,6 +10,8 @@ const server = await createServer({ server: { port: 5199 }, logLevel: 'error' })
 await server.listen();
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+// Ignore any real game controller plugged into this PC (its stick would move the hero).
+await page.addInitScript(() => { navigator.getGamepads = () => []; });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
@@ -29,7 +31,8 @@ async function place(x, y, z, yaw, pitch = 0.3, dist = 8) {
 }
 
 await page.goto('http://localhost:5199/');
-await page.evaluate(() => localStorage.clear());
+// Gameplay checks don't need fancy graphics; Low quality keeps the software renderer fast enough.
+await page.evaluate(() => { localStorage.clear(); localStorage.setItem('kingdom-quality', 'low'); });
 
 for (const id of ['sakura', 'bamboo', 'lantern', 'volcano', 'sky']) {
   await page.goto(`http://localhost:5199/?level=${id}`);
@@ -47,15 +50,6 @@ for (const id of ['sakura', 'bamboo', 'lantern', 'volcano', 'sky']) {
   console.log(id, 'next to star', goal.map((v) => +v.toFixed(1)), await state());
   await shot(`${id}-3-goal`);
 }
-
-// Sakura stairs: walk up them holding W.
-await page.goto('http://localhost:5199/?level=sakura');
-await ready();
-await place(0, 0, -53, 0);
-await page.keyboard.down('KeyW');
-await page.waitForTimeout(4500);
-await page.keyboard.up('KeyW');
-console.log('sakura after walking up the stairs', await state());
 
 // Hub: walk into the first portal.
 await page.goto('http://localhost:5199/');

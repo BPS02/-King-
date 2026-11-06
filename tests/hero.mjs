@@ -10,10 +10,12 @@ const server = await createServer({ server: { port: 5199 }, logLevel: 'error' })
 await server.listen();
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+// Ignore any real game controller plugged into this PC (its stick would move the hero).
+await page.addInitScript(() => { navigator.getGamepads = () => []; });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-await page.goto('http://localhost:5199/?level=sakura');
+await page.goto('http://localhost:5199/?level=sakura&quality=low');
 await page.waitForFunction(() => window.game && !window.game.busy, null, { timeout: 120000 });
 await page.waitForTimeout(1500);
 const anim = () => page.evaluate(() => window.game.player.current?.getClip().name);
@@ -30,11 +32,12 @@ await shot('1-idle-weapons');
 const seen = [];
 const watch = setInterval(async () => { try { const a = await anim(); if (seen.at(-1) !== a) seen.push(a); } catch {} }, 60);
 await view(Math.PI * 0.6, 4.5);
+// Press like a player does: again during each swing (no slow screenshots in between).
 for (let i = 0; i < 3; i++) {
   await page.keyboard.press('KeyJ');
-  await page.waitForTimeout(i === 0 ? 450 : 650);
-  await shot(`2-combo-hit${i + 1}`);
+  await page.waitForTimeout(i === 0 ? 350 : 450);
 }
+await shot('2-combo-finisher');
 await page.waitForTimeout(2500);
 clearInterval(watch);
 console.log('combo sequence:', seen.join(' -> '));
