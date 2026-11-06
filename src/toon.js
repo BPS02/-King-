@@ -12,14 +12,31 @@ export function toonGradient() {
   return gradient;
 }
 
-export function toonMaterial(color, extra = {}) {
+// Plain colored toon materials are shared (cached) so big levels stay fast.
+const toonCache = new Map();
+export function toonMaterial(color, extra = null) {
+  if (!extra) {
+    if (!toonCache.has(color)) toonCache.set(color, new THREE.MeshToonMaterial({ color, gradientMap: toonGradient() }));
+    return toonCache.get(color);
+  }
   return new THREE.MeshToonMaterial({ color, gradientMap: toonGradient(), ...extra });
 }
 
+// Glowing toon material (lanterns, lava, crystals). Also cached.
+const glowCache = new Map();
+export function glowMaterial(color, intensity = 0.8) {
+  const key = color + ':' + intensity;
+  if (!glowCache.has(key)) glowCache.set(key, toonMaterial(color, { emissive: color, emissiveIntensity: intensity }));
+  return glowCache.get(key);
+}
+
 // Black outline drawn by pushing back-faces outward along their normals ("inverted hull").
-// Works for skinned meshes too, because the push happens before skinning.
-export function outlineMaterial(thickness) {
-  const mat = new THREE.MeshBasicMaterial({ color: 0x1c1430, side: THREE.BackSide });
+// Works for skinned and instanced meshes too.
+const outlineCache = new Map();
+export function outlineMaterial(thickness, color = 0x1c1430) {
+  const key = thickness + ':' + color;
+  if (outlineCache.has(key)) return outlineCache.get(key);
+  const mat = new THREE.MeshBasicMaterial({ color, side: THREE.BackSide });
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.outlineThickness = { value: thickness };
     shader.vertexShader = 'uniform float outlineThickness;\n' + shader.vertexShader.replace(
@@ -27,6 +44,8 @@ export function outlineMaterial(thickness) {
       '#include <begin_vertex>\ntransformed += normalize(normal) * outlineThickness;'
     );
   };
+  mat.customProgramCacheKey = () => 'outline' + thickness;
+  outlineCache.set(key, mat);
   return mat;
 }
 
@@ -61,7 +80,32 @@ export function makeToon(root, outlineThickness) {
 
 // Outline helper for simple level meshes.
 export function addOutline(mesh, thickness = 0.04) {
-  const o = new THREE.Mesh(mesh.geometry, outlineMaterial(thickness));
-  mesh.add(o);
+  mesh.add(new THREE.Mesh(mesh.geometry, outlineMaterial(thickness)));
   return mesh;
+}
+
+// Soft round glow used for lantern halos, fireflies, embers, the sky orb...
+let glowTex;
+export function glowTexture() {
+  if (glowTex) return glowTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.25, 'rgba(255,255,255,0.6)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  glowTex = new THREE.CanvasTexture(c);
+  return glowTex;
+}
+
+export function glowSprite(color, size, opacity = 1) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture(), color, transparent: true, opacity,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  s.scale.set(size, size, 1);
+  return s;
 }

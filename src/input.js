@@ -13,11 +13,15 @@ export class Input {
       this.keys.add(e.code);
       if (e.code === 'Space') { this.jumpPressed = true; e.preventDefault(); }
       if (e.code === 'KeyJ') this.attackPressed = true;
+      if (e.code === 'Escape') this.escapePressed = true;
+      if (e.code === 'KeyL') this.kickPressed = true;
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => this.keys.clear());
 
+    dom.addEventListener('contextmenu', (e) => e.preventDefault());
     dom.addEventListener('pointerdown', (e) => {
+      if (e.button === 2) { this.rightMouse = true; return; }   // right mouse button = block
       this.dragging = true;
       this.dragDist = 0;
       dom.setPointerCapture(e.pointerId);
@@ -28,7 +32,8 @@ export class Input {
       this.mouseDY += e.movementY;
       this.dragDist += Math.abs(e.movementX) + Math.abs(e.movementY);
     });
-    dom.addEventListener('pointerup', () => {
+    dom.addEventListener('pointerup', (e) => {
+      if (e.button === 2) { this.rightMouse = false; return; }
       // A click (not a drag) attacks.
       if (this.dragging && this.dragDist < 6) this.attackPressed = true;
       this.dragging = false;
@@ -36,6 +41,7 @@ export class Input {
   }
 
   get jumpHeld() { return this.keys.has('Space'); }
+  get blockHeld() { return this.keys.has('KeyK') || !!this.rightMouse; }
   get walkHeld() { return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'); }
 
   // x = right, y = forward, each -1..1
@@ -53,6 +59,8 @@ export class Input {
   endFrame() {
     this.jumpPressed = false;
     this.attackPressed = false;
+    this.escapePressed = false;
+    this.kickPressed = false;
     this.mouseDX = 0;
     this.mouseDY = 0;
   }
