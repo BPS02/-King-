@@ -37,6 +37,15 @@
       position: fixed; top: 222px; right: 22px; width: 38px; height: 38px; border-radius: 50%; border: 3px solid #fff;
       background: rgba(30,20,40,0.55); color: #fff; font-size: 20px; cursor: pointer;
     }
+    #talk { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); padding: 8px 16px; border-radius: 20px;
+      background: rgba(20, 14, 10, 0.72); color: #fff; font: 700 17px system-ui, sans-serif; display: none; pointer-events: none;
+      border: 2px solid #d9a441; }
+    #dialog { position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); width: min(760px, 88vw); min-height: 96px;
+      padding: 16px 22px 26px; border-radius: 14px; background: rgba(24, 16, 12, 0.88); border: 3px solid #d9a441; color: #fff8ec;
+      font: 500 20px/1.45 system-ui, sans-serif; display: none; cursor: pointer; box-shadow: 0 6px 24px rgba(0,0,0,0.45); }
+    #dialog .who { color: #ffd27a; font-weight: 800; font-size: 17px; margin-bottom: 6px; letter-spacing: 0.5px; }
+    #dialog .next { position: absolute; right: 16px; bottom: 6px; font-size: 13px; opacity: 0.75; }
+    #np { position: fixed; right: 22px; bottom: 64px; color: #fff3d8; font: italic 600 16px system-ui, sans-serif; text-shadow: 0 1px 4px #000; opacity: 0; transition: opacity 1.2s; pointer-events: none; }
     #settings {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); display: none; z-index: 3;
       background: rgba(20,14,26,0.88); color: #fff; padding: 22px 26px; border-radius: 14px; text-align: center; min-width: 320px;
@@ -59,8 +68,11 @@
   <div id="hud"></div>
   <canvas id="minimap"></canvas>
   <div id="toast"></div>
-  <div id="help"><span id="helpKeys">WASD / Arrows: move &nbsp;·&nbsp; Space: jump &nbsp;·&nbsp; Shift: walk &nbsp;·&nbsp; J or Click: sword (press again for a 3-hit combo) &nbsp;·&nbsp; K or Right-click: block &nbsp;·&nbsp; L: kick &nbsp;·&nbsp; Drag mouse: camera &nbsp;·&nbsp; Mouse wheel: zoom &nbsp;·&nbsp; O: graphics</span><div id="help2"></div></div>
+  <div id="help"><span id="helpKeys">WASD / Arrows: move &nbsp;·&nbsp; Space: jump &nbsp;·&nbsp; Shift: walk &nbsp;·&nbsp; J or Click: sword (press again for a 3-hit combo) &nbsp;·&nbsp; K or Right-click: block &nbsp;·&nbsp; L: kick &nbsp;·&nbsp; Drag mouse: camera &nbsp;·&nbsp; Mouse wheel: zoom &nbsp;·&nbsp; E: talk &nbsp;·&nbsp; M: music &nbsp;·&nbsp; O: graphics</span><div id="help2"></div></div>
   <div id="banner"></div>
+  <div id="talk"></div>
+  <div id="np"></div>
+  <div id="dialog"><div class="who"></div><div class="text"></div><div class="next"></div></div>
   <div id="fade"></div>
   <button id="gear" title="Graphics settings (O)">⚙</button>
   <div id="settings"></div>

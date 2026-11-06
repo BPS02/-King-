@@ -84,8 +84,14 @@ export function resetCityMaterials() { MATS = null; }
 // ---------------------------------------------------------------------------------------------
 // Townspeople: animated copies of the game's characters (samurai guards, the King).
 // path: list of points to walk between (back and forth); without a path they stand still.
+// name / lines / voice: who they are, what they say when you talk to them (lines can be a
+// function of the player's progress), and how their voice sounds (pitch, rate).
+// While talking they stop, turn to face you and nod their head as they speak.
 // ---------------------------------------------------------------------------------------------
-export function npc(s, kind, x, y, z, { facing = 0, height = 1.9, clip = 'idle', path = null, speed = 1.3, ground = null } = {}) {
+export function npc(s, kind, x, y, z, {
+  facing = 0, height = 1.9, clip = 'idle', path = null, speed = 1.3, ground = null,
+  name = null, lines = null, voice = { pitch: 1, rate: 1 },
+} = {}) {
   const gltf = ASSETS.npc[kind];
   if (!gltf) return null;
   const model = cloneSkinned(gltf.scene);
@@ -101,17 +107,48 @@ export function npc(s, kind, x, y, z, { facing = 0, height = 1.9, clip = 'idle',
   root.userData.dynamic = true;               // never merged into the static scenery
   s.add(root);
   const mixer = new THREE.AnimationMixer(model);
-  const play = (name) => {
-    const c = gltf.animations.find((a) => a.name === name) || gltf.animations.find((a) => a.name === 'idle') || gltf.animations[0];
-    if (c) mixer.clipAction(c).play();
+  const action = (n) => {
+    const c = gltf.animations.find((a) => a.name === n) || gltf.animations.find((a) => a.name === 'idle') || gltf.animations[0];
+    return c ? mixer.clipAction(c) : null;
   };
-  play(path ? 'walk' : clip);
+  const idle = action(clip), walk = path ? action('walk') : null;
+  let current = walk || idle;
+  current?.play();
+  const switchTo = (a) => { if (!a || a === current) return; a.reset().play(); current?.crossFadeTo(a, 0.25, false); current = a; };
   mixer.update(Math.random() * 3);            // so they don't all move in step
+  // Bones used for the "talking" gestures.
+  let head = null, spine = null;
+  model.traverse((o) => {
+    if (!o.isBone) return;
+    if (/Head$/.test(o.name)) head = o;
+    if (/Spine2$/.test(o.name)) spine = o;
+  });
+
+  const person = { root, name, lines, voice, kind, talking: false, talkTime: 0, lookAt: new THREE.Vector3(), homeFacing: facing };
+  if (name) (s.npcs ??= []).push(person);
+
   let leg = 0, pause = 0;
-  const pos = root.position;
+  const pos = root.position, q = new THREE.Quaternion(), ax = new THREE.Vector3(1, 0, 0), ay = new THREE.Vector3(0, 1, 0);
+  const turnTo = (want, dt, speedK) => {
+    let diff = want - root.rotation.y;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    root.rotation.y += diff * Math.min(1, dt * speedK);
+  };
   s.onUpdate((dt) => {
     mixer.update(dt);
-    if (!path) return;
+    if (person.talking) {
+      // Stop, face the player, and nod / sway while speaking.
+      switchTo(idle);
+      person.talkTime += dt;
+      turnTo(Math.atan2(person.lookAt.x - pos.x, person.lookAt.z - pos.z), dt, 5);
+      const t = person.talkTime;
+      if (head) head.quaternion.multiply(q.setFromAxisAngle(ax, Math.sin(t * 7.5) * 0.09 + Math.sin(t * 2.3) * 0.04));
+      if (head) head.quaternion.multiply(q.setFromAxisAngle(ay, Math.sin(t * 1.7) * 0.12));
+      if (spine) spine.quaternion.multiply(q.setFromAxisAngle(ay, Math.sin(t * 1.3) * 0.06));
+      return;
+    }
+    if (!path) { turnTo(person.homeFacing, dt, 2); return; }
+    switchTo(walk);
     if (pause > 0) { pause -= dt; return; }
     const to = path[(leg + 1) % path.length];
     const dx = to.x - pos.x, dz = to.z - pos.z, d = Math.hypot(dx, dz);
@@ -119,11 +156,7 @@ export function npc(s, kind, x, y, z, { facing = 0, height = 1.9, clip = 'idle',
     const step = Math.min(d, speed * dt);
     pos.x += (dx / d) * step; pos.z += (dz / d) * step;
     if (ground) pos.y = ground(pos.x, pos.z);
-    // Turn smoothly toward where they are walking.
-    const want = Math.atan2(dx, dz);
-    let diff = want - root.rotation.y;
-    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-    root.rotation.y += diff * Math.min(1, dt * 6);
+    turnTo(Math.atan2(dx, dz), dt, 6);        // turn smoothly toward where they are walking
   });
   return root;
 }

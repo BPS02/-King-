@@ -25,6 +25,7 @@ export class Input {
       if (e.code === 'KeyJ') { this.attackPressed = true; this.attackCount = (this.attackCount || 0) + 1; }
       if (e.code === 'Escape') this.escapePressed = true;
       if (e.code === 'KeyL') this.kickPressed = true;
+      if (e.code === 'KeyE' || e.code === 'Enter') this.talkPressed = true;
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => this.keys.clear());
@@ -84,6 +85,7 @@ export class Input {
     for (const b of [PAD.SQUARE, PAD.R1]) if (this.padTaps.has(b)) { this.attackPressed = true; this.attackCount = (this.attackCount || 0) + 1; }
     if (this.padTaps.has(PAD.CIRCLE) || this.padTaps.has(PAD.R2)) this.kickPressed = true;
     if (this.padTaps.has(PAD.CREATE)) this.escapePressed = true;
+    if (this.padTaps.has(PAD.TRIANGLE)) this.talkPressed = true;
   }
 
   padTap(button) { return this.padTaps.has(button); }
@@ -127,6 +129,7 @@ export class Input {
     this.jumpPressed = false;
     this.attackPressed = false;
     this.escapePressed = false;
+    this.talkPressed = false;
     this.kickPressed = false;
     this.padTaps.clear();
     this.mouseDX = 0;

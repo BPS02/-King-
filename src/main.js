@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Input, PAD } from './input.js';
+import { Music } from './music.js';
 import { Player } from './player.js';
 import { Minimap } from './minimap.js';
 import { Hub } from './levels/hub.js';
@@ -58,6 +59,25 @@ let stage = null, current = null, minimap = null, busy = false, gemCount = 0;
 // Camera follows close behind the hero. Mouse wheel zooms (saved in this browser).
 const ZOOM_KEY = 'kingdom-zoom';
 const startDist = +localStorage.getItem(ZOOM_KEY) || 5.2;
+// Soundtrack (starts on the first click / key press: browsers block sound before that).
+const music = new Music();
+addEventListener('pointerdown', () => music.start());
+addEventListener('keydown', (e) => { music.start(); if (e.code === 'KeyM') toggleMusic(); });
+function toggleMusic() {
+  music.setEnabled(!music.enabled);
+  const b = document.getElementById('musicBtn');
+  if (b) { b.textContent = music.enabled ? 'On' : 'Off'; b.classList.toggle('on', music.enabled); }
+  toast(music.enabled ? '♪ Music on' : 'Music off', 1.5);
+}
+function nowPlaying() {
+  const el = document.getElementById('np');
+  if (!el || !music.enabled) return;
+  setTimeout(() => { el.textContent = '♪ ' + music.moodName; el.style.opacity = 1; setTimeout(() => (el.style.opacity = 0), 4500); }, 1500);
+}
+
+// Conversation with a townsperson (see "Talking to townspeople" below).
+const talk = { who: null, lines: [], i: 0, shown: 0, full: '' };
+let voicesOn = localStorage.getItem('kingdom-voices') !== 'off';
 const cam = { yaw: 0, pitch: 0.24, dist: startDist, curDist: startDist, target: new THREE.Vector3() };
 
 // Crown Jewels found in the current town (older saves may hold names from the previous hub).
@@ -79,6 +99,7 @@ async function enter(id, { from = null } = {}) {
   busy = true;
   if (stage) await fade(true);
   banner('');
+  closeTalk();
   if (stage) stage.dispose();
   if (id === 'hub') {
     stage = new Hub(scene, LEVELS, progress);
@@ -93,6 +114,8 @@ async function enter(id, { from = null } = {}) {
   if (post.bloom) { post.bloom.strength = stage.bloom ?? 0.35; post.bloom.threshold = stage.bloomThreshold ?? 1.0; }
   renderer.info.autoReset = false;
   current = id;
+  music.setMood(id);
+  nowPlaying();
   gemCount = 0;
   const back = id === 'hub' && from ? stage.portalSpawn(from) : null;
   player.setLevel(stage, back?.spawn, back?.facing);
@@ -111,6 +134,7 @@ async function finishLevel() {
   if (!progress.stars.includes(current)) progress.stars.push(current);
   save();
   banner('Royal Star!');
+  music.jingle(true);
   await sleep(2600);
   await enter('hub', { from: current });
 }
@@ -127,7 +151,7 @@ await enter(LEVELS.some((l) => l.id === startLevel) ? startLevel : 'hub');
 $('loading').remove();
 
 // Expose for debugging / automated tests.
-window.game = { player, cam, input, enter, progress, renderer, frameTimes, get stage() { return stage; }, get current() { return current; }, get busy() { return busy; }, get post() { return post; } };
+window.game = { player, cam, input, enter, progress, renderer, frameTimes, get stage() { return stage; }, get current() { return current; }, get busy() { return busy; }, get post() { return post; }, get talk() { return talk; }, music };
 
 const raycaster = new THREE.Raycaster();
 const timer = new THREE.Timer();
@@ -173,6 +197,7 @@ function frame() {
         progress.jewels.push(j.userData.name);
         save();
         updateHud();
+        music.jingle(false);
         toast(`Crown Jewel found: ${j.userData.name}! (${jewelsFound()}/${stage.jewels.length})`);
         if (jewelsFound() === stage.jewels.length) banner('All Crown Jewels found!');
       }
@@ -189,8 +214,10 @@ function frame() {
       c.flame.visible = true;
       player.lastSafe.set(c.pos.x, c.pos.y + 0.2, c.pos.z);
       toast('Checkpoint!', 1.6);
+      music.chime();
       input.rumble(0.5, 180);
     }
+    updateTalk(real);
     // Altitude meter for mountain climbs.
     if (stage.summitY && (altTimer -= dt * steps) <= 0) {
       altTimer = 0.2;
@@ -241,19 +268,112 @@ addEventListener('resize', () => {
   post.composer.setSize(innerWidth, innerHeight);
 });
 
+// --- Talking to townspeople (E / Enter, or Triangle on a controller) ---
+// Walk up to someone: a prompt appears. Their words are typed into a box and read aloud by the
+// browser's built-in text-to-speech (can be switched off in the settings menu).
+function pickVoice(person) {
+  const all = (window.speechSynthesis?.getVoices() || []).filter((v) => /^en/i.test(v.lang));
+  if (!all.length) return null;
+  const female = /zira|aria|jenny|susan|hazel|sonia|libby|female|samantha|karen|moira|tessa/i;
+  const pool = all.filter((v) => (person.voice?.female ? female.test(v.name) : !female.test(v.name)));
+  const list = pool.length ? pool : all;
+  let h = 0;
+  for (const c of person.name) h = (h * 31 + c.charCodeAt(0)) | 0;
+  return list[Math.abs(h) % list.length];
+}
+function say(person, text) {
+  if (!voicesOn || !window.speechSynthesis) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  const v = pickVoice(person);
+  if (v) u.voice = v;
+  u.pitch = person.voice?.pitch ?? 1;
+  u.rate = person.voice?.rate ?? 1;
+  speechSynthesis.speak(u);
+}
+function showLine() {
+  talk.full = talk.lines[talk.i];
+  talk.shown = 0;
+  const box = $('dialog');
+  box.style.display = 'block';
+  box.querySelector('.who').textContent = talk.who.name;
+  box.querySelector('.text').textContent = '';
+  const key = input.padName ? '△' : 'E';
+  box.querySelector('.next').textContent = talk.i < talk.lines.length - 1 ? `${key} ▶ next` : `${key} ✕ close`;
+  say(talk.who, talk.full);
+}
+function openTalk(person) {
+  const p = { stars: progress.stars.length, jewels: jewelsFound(), jewelsTotal: stage.jewels.length };
+  talk.who = person;
+  talk.lines = typeof person.lines === 'function' ? person.lines(p) : person.lines;
+  talk.i = 0;
+  person.talking = true;
+  person.talkTime = 0;
+  person.lookAt.copy(player.pos);
+  music.duck(true);
+  showLine();
+}
+function nextLine() {
+  if (talk.shown < talk.full.length) { talk.shown = talk.full.length; return; }   // first press finishes the typing
+  talk.i++;
+  if (talk.i >= talk.lines.length) closeTalk(); else showLine();
+}
+function closeTalk() {
+  if (talk.who) talk.who.talking = false;
+  talk.who = null;
+  music.duck(false);
+  $('dialog').style.display = 'none';
+  window.speechSynthesis?.cancel();
+}
+function updateTalk(dt) {
+  const prompt = $('talk');
+  if (talk.who) {
+    prompt.style.display = 'none';
+    talk.who.lookAt.copy(player.pos);
+    const w = talk.who.root.position;
+    if (Math.hypot(player.pos.x - w.x, player.pos.z - w.z) > 5.5) { closeTalk(); return; }   // walked away
+    talk.shown = Math.min(talk.full.length, talk.shown + dt * 45);
+    $('dialog').querySelector('.text').textContent = talk.full.slice(0, Math.floor(talk.shown));
+    if (input.talkPressed) nextLine();
+    return;
+  }
+  let best = null, bestD = 3.2;
+  for (const n of stage.npcs || []) {
+    const w = n.root.position, d = Math.hypot(player.pos.x - w.x, player.pos.z - w.z);
+    if (d < bestD && Math.abs(player.pos.y - w.y) < 2.5) { best = n; bestD = d; }
+  }
+  if (best) {
+    prompt.textContent = `${input.padName ? '△' : 'E'}  Talk to ${best.name}`;
+    prompt.style.display = 'block';
+    if (input.talkPressed) openTalk(best);
+  } else prompt.style.display = 'none';
+}
+$('dialog').onclick = () => { if (talk.who) nextLine(); };
+window.speechSynthesis?.getVoices();   // starts loading the voice list early
+
 // --- Graphics settings menu (press O) ---
 function buildSettings() {
   const box = $('settings');
   box.innerHTML = '<div class="title">Graphics Quality</div>' +
     Object.entries(QUALITY).map(([k, v]) => `<button data-q="${k}" class="${k === qualityName() ? 'on' : ''}">${v.label}</button>`).join('') +
+    `<div class="title" style="margin-top:14px">Music</div><button id="musicBtn" class="${music.enabled ? 'on' : ''}">${music.enabled ? 'On' : 'Off'}</button>` +
+    `<div class="title" style="margin-top:14px">Voices</div><button id="voiceBtn" class="${voicesOn ? 'on' : ''}">${voicesOn ? 'On' : 'Off'}</button>` +
     '<div class="note">Changing quality reloads the game. Press O (or ○ on a controller) to close.</div><div id="fps"></div>';
-  box.querySelectorAll('button').forEach((b) => b.onclick = () => { setQuality(b.dataset.q); location.search = location.search.replace(/[?&]quality=\w+/, ''); location.reload(); });
+  box.querySelectorAll('button[data-q]').forEach((b) => b.onclick = () => { setQuality(b.dataset.q); location.search = location.search.replace(/[?&]quality=\w+/, ''); location.reload(); });
 }
 buildSettings();
+$('musicBtn').onclick = () => { music.start(); toggleMusic(); };
+$('voiceBtn').onclick = () => {
+  voicesOn = !voicesOn;
+  localStorage.setItem('kingdom-voices', voicesOn ? 'on' : 'off');
+  if (!voicesOn) window.speechSynthesis?.cancel();
+  $('voiceBtn').textContent = voicesOn ? 'On' : 'Off';
+  $('voiceBtn').classList.toggle('on', voicesOn);
+};
 addEventListener('keydown', (e) => { if (e.code === 'KeyO') $('settings').classList.toggle('open'); });
 
 // --- PlayStation / game controller extras ---
-const PAD_HELP = 'Left stick: move (tilt gently to walk) &nbsp;·&nbsp; ✕: jump &nbsp;·&nbsp; □ or R1: sword (press again for a 3-hit combo) &nbsp;·&nbsp; L1 or L2: block &nbsp;·&nbsp; ○ or R2: kick &nbsp;·&nbsp; Right stick: camera &nbsp;·&nbsp; D-pad ↑↓: zoom &nbsp;·&nbsp; Options: graphics';
+const PAD_HELP = 'Left stick: move (tilt gently to walk) &nbsp;·&nbsp; ✕: jump &nbsp;·&nbsp; □ or R1: sword (press again for a 3-hit combo) &nbsp;·&nbsp; L1 or L2: block &nbsp;·&nbsp; ○ or R2: kick &nbsp;·&nbsp; Right stick: camera &nbsp;·&nbsp; D-pad ↑↓: zoom &nbsp;·&nbsp; △: talk &nbsp;·&nbsp; M: music &nbsp;·&nbsp; Options: graphics';
 let lastPad = null, menuIndex = 0;
 function padFrame() {
   // Show controller help when one is plugged in, keyboard help when it's unplugged.
@@ -266,6 +386,7 @@ function padFrame() {
     if (stage) updateHud();
   }
   if (!input.padName) return;
+  if (input.padTaps.size) music.start();
   const box = $('settings');
   if (input.padTap(PAD.OPTIONS)) {
     box.classList.toggle('open');

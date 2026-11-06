@@ -404,25 +404,90 @@ export class Hub extends Stage {
 
   // ---------------------------------------------------------------- people
   buildPeople() {
-    const C = CASTLE, isl = C.z + MOAT_IN - 0.5;
+    const C = CASTLE, isl = C.z + MOAT_IN - 0.5, g = this.ground;
+    // Lines can depend on how far the player has got: p = { stars, jewels, jewelsTotal }.
     // Samurai guards at the bridge and the gate.
-    for (const sx of [-1, 1]) {
-      npc(this, 'samurai', C.x + sx * 3.6, CITY_Y, C.z + MOAT_OUT + 2.5, { facing: 0, height: 1.95 });
-      npc(this, 'samurai', C.x + sx * 3.2, ISLAND_Y, isl + 0.4, { facing: 0, height: 1.95 });
-    }
+    npc(this, 'samurai', C.x - 3.6, CITY_Y, C.z + MOAT_OUT + 2.5, {
+      name: 'Bridge Guard Kenji', voice: { pitch: 0.8, rate: 0.95 },
+      lines: [
+        'Halt! Who goes there?',
+        'Oh, it is you! Welcome back to Hoshi Castle.',
+        'The King is waiting in the castle courtyard. Go through the gate and up the stone stairs.',
+      ],
+    });
+    npc(this, 'samurai', C.x + 3.6, CITY_Y, C.z + MOAT_OUT + 2.5, {
+      name: 'Bridge Guard Daisuke', voice: { pitch: 1.05, rate: 1.05 },
+      lines: [
+        'Nice evening, isn\'t it? The lanterns are already lit.',
+        'I heard a little boat drifts along the canal in the south of town...',
+        'And the boatman says something shiny is riding on it! Jump aboard when it passes by.',
+      ],
+    });
+    npc(this, 'samurai', C.x - 3.2, ISLAND_Y, isl + 0.4, {
+      name: 'Gate Guard Hiro', voice: { pitch: 0.9, rate: 0.9 },
+      lines: [
+        'This is the great gate of Hoshi Castle.',
+        'The keep is five storeys tall. Nobody climbs the roofs... we use the wooden lift on its east side.',
+        'Ride it all the way up to the top balcony. The view of the town is amazing!',
+      ],
+    });
+    npc(this, 'samurai', C.x + 3.2, ISLAND_Y, isl + 0.4, {
+      name: 'Gate Guard Sora', voice: { pitch: 1.15, rate: 1.1 },
+      lines: [
+        'Have you seen the fire-watch tower in the market square?',
+        'Its stairs wrap around the outside, all the way up to the bell.',
+        'Up there you can spot fires... and maybe a Crown Jewel!',
+      ],
+    });
     // The King waits in the castle courtyard in front of the keep.
-    npc(this, 'king', KEEP.x, HON_Y, KEEP.z + 18, { facing: 0, height: 1.6 });
+    npc(this, 'king', KEEP.x, HON_Y, KEEP.z + 18, {
+      name: 'The King', voice: { pitch: 0.7, rate: 0.88 },
+      lines: (p) => {
+        const out = ['Ah, my brave samurai! Welcome home to Hoshi Castle Town.'];
+        if (p.stars === 0) {
+          out.push('Five sacred mountains surround our land, and at the top of each one shines a Royal Star.');
+          out.push('Go west from the castle to the Gate of the Five Peaks. Each glowing portal leads to a mountain.');
+          out.push('Climb to the summit, light the lanterns on the way, and bring the Royal Star home!');
+        } else if (p.stars < 5) {
+          out.push(`You have brought back ${p.stars} of the 5 Royal Stars. Splendid!`);
+          out.push(`Only ${5 - p.stars} more to go. The Gate of the Five Peaks is west of the castle.`);
+        } else {
+          out.push('All five Royal Stars! The whole town is singing your name!');
+          out.push('You are the greatest climber in the kingdom.');
+        }
+        if (p.jewels < p.jewelsTotal) out.push(`Also... ${p.jewelsTotal - p.jewels} of my Crown Jewels are still hidden around town. Could you find them for me?`);
+        else out.push('And you found every one of my Crown Jewels. Thank you, my friend!');
+        return out;
+      },
+    });
     // Samurai patrols walking the streets (fewer on Low quality).
-    const g = this.ground;
-    if (qualityName() === 'low') {
-      npc(this, 'samurai', -3, CITY_Y, 20, { path: [{ x: -3, z: 20 }, { x: -3, z: 118 }], ground: g, speed: 1.4 });
-      return;
+    const watch = [
+      [-3, 20, [{ x: -3, z: 20 }, { x: -3, z: 118 }], 1.4, 'Watchman Taro', { pitch: 1.0, rate: 1.0 }, [
+        'Evening! Mind the canal down south, the water is cold.',
+        'The merchants on Castle Avenue sell the best rice cakes in the kingdom.',
+      ]],
+      [3, 112, [{ x: 3, z: 112 }, { x: 3, z: 18 }], 1.3, 'Watchman Jiro', { pitch: 0.85, rate: 0.95 }, [
+        'Over in the east part of town there is an old white storehouse.',
+        'The merchants stack crates next to it. A nimble samurai could jump all the way up to its roof!',
+      ]],
+      [-80, 46, [{ x: -80, z: 46 }, { x: 80, z: 46 }], 1.5, 'Watchman Ren', { pitch: 1.2, rate: 1.1 }, [
+        'This is Market Street. Busy in the day, peaceful at night.',
+        'Have you climbed Fire Mountain yet? Watch out for the lava pools at its foot!',
+      ]],
+      [46, 110, [{ x: 46, z: 110 }, { x: 46, z: 20 }, { x: -46, z: 20 }, { x: -46, z: 110 }], 1.4, 'Watchman Goro', { pitch: 0.75, rate: 0.9 }, [
+        'The pagoda at the temple has five roofs.',
+        'Jump from one roof to the next and you will reach the very top. Something sparkles up there!',
+      ]],
+      [-74, -6, [{ x: -74, z: -6 }, { x: -74, z: -78 }], 1.1, 'Shrine Keeper Aya', { pitch: 1.2, rate: 1.0, female: true }, [
+        'Welcome to the Gate of the Five Peaks.',
+        'Step into a glowing portal to travel to one of the five mountains.',
+        'When a portal\'s name turns gold, its Royal Star has already been won.',
+      ]],
+    ];
+    const count = qualityName() === 'low' ? 2 : watch.length;
+    for (const [x, z, path, speed, name, voice, lines] of watch.slice(0, count)) {
+      npc(this, 'samurai', x, CITY_Y, z, { path, ground: g, speed, name, voice, lines });
     }
-    npc(this, 'samurai', -3, CITY_Y, 20, { path: [{ x: -3, z: 20 }, { x: -3, z: 118 }], ground: g, speed: 1.4 });
-    npc(this, 'samurai', 3, CITY_Y, 112, { path: [{ x: 3, z: 112 }, { x: 3, z: 18 }], ground: g, speed: 1.3 });
-    npc(this, 'samurai', -80, CITY_Y, 46, { path: [{ x: -80, z: 46 }, { x: 80, z: 46 }], ground: g, speed: 1.5 });
-    npc(this, 'samurai', 46, CITY_Y, 110, { path: [{ x: 46, z: 110 }, { x: 46, z: 20 }, { x: -46, z: 20 }, { x: -46, z: 110 }], ground: g, speed: 1.4 });
-    npc(this, 'samurai', -74, CITY_Y, -6, { path: [{ x: -74, z: -6 }, { x: -74, z: -78 }], ground: g, speed: 1.1 });
   }
 
   // ---------------------------------------------------------------- trees, grass, petals

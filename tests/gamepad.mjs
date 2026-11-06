@@ -29,7 +29,8 @@ ok('back hint uses Create button', help2.includes('Create'), help2);
 
 let a = await state();
 await page.evaluate(() => { const g = window.game; g.cam.yaw = g.player.facing + Math.PI; window.__pad.axes[1] = -1; });     // left stick fully forward (along the trail)
-await page.waitForTimeout(1200);
+// Wait until he is up to speed (the slow test renderer can stall for a moment after the camera turns).
+await page.waitForFunction(() => Math.hypot(window.game.player.vel.x, window.game.player.vel.z) > 6, null, { timeout: 10000 }).catch(() => {});
 let b = await state();
 await page.evaluate(() => { window.__pad.axes[1] = 0; });
 const ran = b.speed;
@@ -38,7 +39,8 @@ await page.waitForTimeout(600);
 
 a = await state();
 await page.evaluate(() => { window.__pad.axes[1] = -0.4; });   // gentle tilt
-await page.waitForTimeout(1200);
+await page.waitForFunction(() => Math.hypot(window.game.player.vel.x, window.game.player.vel.z) > 0.8, null, { timeout: 10000 }).catch(() => {});
+await page.waitForTimeout(600);
 b = await state();
 await page.evaluate(() => { window.__pad.axes[1] = 0; });
 const walked = b.speed;
